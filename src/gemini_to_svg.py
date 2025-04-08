@@ -5,7 +5,7 @@ from tqdm import tqdm
 from google import genai
 from google.genai import types
 
-
+import pandas as pd
 
 load_dotenv()
 
@@ -201,6 +201,23 @@ def process_csv(input_csv_path, output_path):
         time.sleep(0.5)
     
     print(f"Processing complete. Results saved to {output_path}")
+
+    ### doing some additional cleanup
+    print("Cleaning up the SVG content...")
+    try :
+        # Read the output JSONL file
+        df = pd.read_json(output_path, lines=True)
+        # remove the ```xml and ``` in the svg_content column
+        df['svg_content'] = df['svg_content'].str.replace('```xml', '', regex=False).str.replace('```', '', regex=False)
+        df['svg_content'] = df['svg_content'].str.strip()
+        # save it back to a new jsonl file
+        df.to_json(output_path, orient='records', lines=True)
+
+    except Exception as e:
+        print(f"Error cleaning up SVG content: {e}")
+        return
+    
+    print(f"Saved cleaned data to {output_path}")
 
 if __name__ == "__main__":
     # File paths
