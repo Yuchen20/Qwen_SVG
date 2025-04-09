@@ -68,8 +68,8 @@ class SVGDataset:
                 self.data.append(json.loads(line.strip()))
                 
         # Add special tokens if not present
-        special_tokens = {"additional_special_tokens": ["<reasoning>", "</reasoning>"]}
-        self.tokenizer.add_special_tokens(special_tokens)
+        # special_tokens = {"additional_special_tokens": ["<reasoning>", "</reasoning>"]}
+        # self.tokenizer.add_special_tokens(special_tokens)
     
     def prepare_dataset(self) -> DatasetDict:
         """Prepare the dataset for training by converting to HF Dataset format and splitting."""
@@ -159,7 +159,7 @@ def create_model_and_tokenizer(
         model = get_peft_model(model, peft_config)
         
     # Resize token embeddings for new special tokens
-    model.resize_token_embeddings(len(tokenizer))
+    # model.resize_token_embeddings(len(tokenizer))
     
     return model, tokenizer
 

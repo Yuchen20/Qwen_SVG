@@ -28,9 +28,9 @@ def generate_svg(
     )
     
     # Add special tokens
-    special_tokens = {"additional_special_tokens": ["<reasoning>", "</reasoning>"]}
-    tokenizer.add_special_tokens(special_tokens)
-    model.resize_token_embeddings(len(tokenizer))
+    # special_tokens = {"additional_special_tokens": ["<reasoning>", "</reasoning>"]}
+    # tokenizer.add_special_tokens(special_tokens)
+    # model.resize_token_embeddings(len(tokenizer))
     
     # Load LoRA weights
     model = PeftModel.from_pretrained(model, model_path)

@@ -14,8 +14,8 @@ def analyze_token_lengths(data_path: str, model_name: str = "Qwen/Qwen2.5-1.5B-I
     """Analyze and visualize the token length distribution of the dataset."""
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    special_tokens = {"additional_special_tokens": ["<reasoning>", "</reasoning>"]}
-    tokenizer.add_special_tokens(special_tokens)
+    # special_tokens = {"additional_special_tokens": ["<reasoning>", "</reasoning>"]}
+    # tokenizer.add_special_tokens(special_tokens)
     
     # Load data and calculate lengths
     lengths = []
