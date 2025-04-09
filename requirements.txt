@@ -1,0 +1,15 @@
+transformers>=4.36.0
+torch>=2.0.0
+datasets>=2.15.0
+peft>=0.7.0
+wandb>=0.16.0
+matplotlib>=3.7.0
+numpy>=1.24.0
+defusedxml>=0.7.0  # For safe XML parsing
+google-genai
+pandas
+tqdm
+python-dotenv
+ipykernel
+jupyter
+seaborn

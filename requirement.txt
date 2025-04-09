@@ -1,7 +1,0 @@
-google-genai
-pandas
-numpy
-tqdm
-python-dotenv
-ipykernel
-jupyter
