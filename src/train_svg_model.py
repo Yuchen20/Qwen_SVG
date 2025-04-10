@@ -197,9 +197,11 @@ def create_peft_config(
 
 class WandbCallback(TrainerCallback):
     """Custom callback for logging to Weights & Biases."""
-    def __init__(self, config, tokenizer):
+    def __init__(self, config, tokenizer, dataset_dict=None):
         super().__init__()
         self.tokenizer = tokenizer
+        self.dataset_dict = dataset_dict
+        self.sample_idx = 0  # For rotating through validation samples
         wandb.init(project="svg-generation", config=config)
     
     def on_log(self, args, state, control, logs=None, **kwargs):
@@ -212,18 +214,35 @@ class WandbCallback(TrainerCallback):
         if not metrics:
             return
         
-        # Get the last validation sample
-        if hasattr(state, "eval_dataloader") and state.eval_dataloader is not None:
-            try:
-                # Take a sample from validation set
-                eval_dataset = state.eval_dataloader.dataset
-                if len(eval_dataset) > 0:
-                    sample_idx = len(eval_dataset) - 1  # Take the last sample
-                    sample = {k: v.unsqueeze(0).to(args.device) for k, v in eval_dataset[sample_idx].items()}
+        model = kwargs.get('model')
+        if model is None and hasattr(state, "model"):
+            model = state.model
+            
+        if model is None:
+            return
+            
+        try:
+            # Get a validation sample (rotate through samples over time)
+            if self.dataset_dict and 'validation' in self.dataset_dict:
+                validation_dataset = self.dataset_dict['validation']
+                if len(validation_dataset) > 0:
+                    # Rotate through validation samples
+                    self.sample_idx = (self.sample_idx + 1) % len(validation_dataset)
+                    sample = {k: v.unsqueeze(0).to(args.device) for k, v in validation_dataset[self.sample_idx].items()}
+                    
+                    # Get original input text for reference
+                    input_ids = sample["input_ids"][0].detach().cpu().tolist()
+                    input_text = self.tokenizer.decode(input_ids, skip_special_tokens=False)
+                    
+                    # Find the description in the input for a cleaner log
+                    description = "N/A"
+                    match = re.search(r'### Description\s*(.*?)(?=###)', input_text, re.DOTALL)
+                    if match:
+                        description = match.group(1).strip()
                     
                     # Generate output
                     with torch.no_grad():
-                        outputs = state.model.generate(
+                        outputs = model.generate(
                             **sample,
                             max_new_tokens=2400,
                             do_sample=True,
@@ -235,14 +254,20 @@ class WandbCallback(TrainerCallback):
                     # Decode the output
                     generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=False)
                     
-                    # Log the generated text to wandb
+                    # Find SVG content in the generated text
+                    svg_match = re.search(r'<svg.*?</svg>', generated_text, re.DOTALL)
+                    svg_content = svg_match.group(0) if svg_match else "No SVG found in generated output"
+                    
+                    # Log sample info to wandb
                     wandb.log({
+                        "validation_description": description,
                         "validation_sample_generation": wandb.Html(f"<pre>{generated_text}</pre>"),
+                        "validation_svg": wandb.Html(f"{svg_content}"),
                     })
-            except Exception as e:
-                print(f"Error logging validation sample: {e}")
-                import traceback
-                traceback.print_exc()
+        except Exception as e:
+            print(f"Error logging validation sample: {e}")
+            import traceback
+            traceback.print_exc()
 
 class MemoryEfficientTrainer(Trainer):
     """Custom trainer with a more memory-efficient evaluation."""
@@ -389,20 +414,25 @@ def train(
         learning_rate=learning_rate,
         weight_decay=0.01,
         max_grad_norm=1.0,
-        logging_steps=1,
+        logging_steps=10,
         logging_first_step=True,
+        # Evaluate at fixed intervals during training but only compute loss
         evaluation_strategy="steps",
-        eval_steps=30,
+        eval_steps=100,
         save_strategy="steps",
         save_steps=200,
         save_total_limit=3,
         load_best_model_at_end=True,
-        metric_for_best_model="eval_valid_svg_ratio",  # Fixed metric name
-        greater_is_better=True,
+        # Use validation loss as the metric for selecting the best model
+        metric_for_best_model="eval_loss",
+        # Lower loss is better
+        greater_is_better=False,
         warmup_ratio=warmup_ratio,
         fp16=fp16,
         report_to="none",  # We'll use custom W&B logging
         remove_unused_columns=False,  # Added to fix potential column issues
+        # Do not compute SVG metrics during training evaluation steps
+        prediction_loss_only=True,
     )
 
     # Initialize the Trainer
@@ -426,7 +456,7 @@ def train(
             "num_epochs": num_epochs,
             "warmup_ratio": warmup_ratio,
             "fp16": fp16,
-        }, tokenizer)],
+        }, tokenizer, dataset_dict)],
     )
 
     # Train the model
@@ -435,9 +465,23 @@ def train(
     # Save the final model
     trainer.save_model()
     
-    # Run evaluation on test set
-    metrics = trainer.evaluate(dataset_dict["test"], metric_key_prefix="test")
-    print(f"\nTest set metrics:\n{metrics}")
+    # Run full evaluation with metrics now that training is complete
+    print("\n=== Running final validation set evaluation with full metrics ===")
+    # Disable prediction_loss_only to compute all metrics
+    trainer.args.prediction_loss_only = False
+    val_metrics = trainer.evaluate(dataset_dict["validation"], metric_key_prefix="final_val")
+    print(f"\nValidation set metrics:\n{val_metrics}")
+    
+    # Run evaluation on test set with full metrics
+    print("\n=== Running final test set evaluation with full metrics ===")
+    test_metrics = trainer.evaluate(dataset_dict["test"], metric_key_prefix="final_test")
+    print(f"\nTest set metrics:\n{test_metrics}")
+    
+    # Log final metrics to wandb
+    wandb.log({
+        "final_validation_metrics": val_metrics,
+        "final_test_metrics": test_metrics
+    })
 
 if __name__ == "__main__":
     import argparse
