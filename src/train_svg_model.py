@@ -15,12 +15,16 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
+    EvalLoopOutput,
     PreTrainedModel,
     PreTrainedTokenizer,
     Trainer,
     TrainerCallback,
     TrainingArguments,
 )
+from transformers.utils import logging
+
+logger = logging.get_logger(__name__)
 
 PROMPT_TEMPLATE = """### Instruction
 Generate an SVG for the following description. Begin with a short reasoning enclosed in <reasoning>...</reasoning> tags. Follow the reasoning with a constrained SVG as per the specifications.
@@ -183,14 +187,157 @@ def create_peft_config(
 
 class WandbCallback(TrainerCallback):
     """Custom callback for logging to Weights & Biases."""
-    def __init__(self, config):
+    def __init__(self, config, tokenizer):
         super().__init__()
+        self.tokenizer = tokenizer
         wandb.init(project="svg-generation", config=config)
     
     def on_log(self, args, state, control, logs=None, **kwargs):
         """Log metrics to W&B."""
         if logs:
             wandb.log(logs)
+    
+    def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+        """Log sample generations from validation set."""
+        if not metrics:
+            return
+        
+        # Get the last validation sample
+        if hasattr(state, "eval_dataloader") and state.eval_dataloader is not None:
+            try:
+                # Take a sample from validation set
+                eval_dataset = state.eval_dataloader.dataset
+                if len(eval_dataset) > 0:
+                    sample_idx = len(eval_dataset) - 1  # Take the last sample
+                    sample = {k: v.unsqueeze(0).to(args.device) for k, v in eval_dataset[sample_idx].items()}
+                    
+                    # Generate output
+                    with torch.no_grad():
+                        outputs = state.model.generate(
+                            **sample,
+                            max_new_tokens=2400,
+                            do_sample=True,
+                            temperature=0.8,
+                            top_p=0.9,
+                            pad_token_id=self.tokenizer.pad_token_id,
+                        )
+                    
+                    # Decode the output
+                    generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=False)
+                    
+                    # Log the generated text to wandb
+                    wandb.log({
+                        "validation_sample_generation": wandb.Html(f"<pre>{generated_text}</pre>"),
+                    })
+            except Exception as e:
+                print(f"Error logging validation sample: {e}")
+                import traceback
+                traceback.print_exc()
+
+class MemoryEfficientTrainer(Trainer):
+    """Custom trainer with a more memory-efficient evaluation."""
+    
+    def evaluation_loop(
+        self,
+        dataloader,
+        description,
+        prediction_loss_only=None,
+        ignore_keys=None,
+        metric_key_prefix="eval",
+    ):
+        """
+        Override the evaluation loop to save memory by not storing all predictions.
+        """
+        args = self.args
+        prediction_loss_only = prediction_loss_only if prediction_loss_only is not None else args.prediction_loss_only
+        
+        # Initialize metrics dict and set model to eval mode
+        metrics = {}
+        model = self._wrap_model(self.model, training=False, dataloader=dataloader)
+        model.eval()
+        
+        # Disable adding preds to outputs by default to save memory
+        compute_metrics = self.compute_metrics
+        
+        # Main evaluation loop
+        batch_size = dataloader.batch_size
+        num_samples = len(dataloader.dataset)
+        num_batches = len(dataloader)
+        
+        logger.info(f"***** Running {description} *****")
+        logger.info(f"  Num examples = {num_samples}")
+        logger.info(f"  Batch size = {batch_size}")
+        
+        # Initialize variables for metrics
+        total_loss = 0.0
+        total_samples = 0
+        
+        # For SVG metrics
+        all_preds = []
+        all_labels = []
+        max_samples_for_metrics = min(100, num_samples)  # Limit samples to save memory
+        samples_seen = 0
+        
+        for step, inputs in enumerate(dataloader):
+            # Move inputs to appropriate device
+            inputs = self._prepare_inputs(inputs)
+            
+            # Forward pass with no_grad context
+            with torch.no_grad():
+                # Get outputs and loss
+                outputs = model(**inputs)
+                loss = outputs.loss
+                
+                # Update loss stats
+                if loss is not None:
+                    total_loss += loss.detach().float() * batch_size
+                    total_samples += batch_size
+            
+            # Collect predictions and labels for a limited number of samples
+            if samples_seen < max_samples_for_metrics:
+                # Get predictions
+                logits = outputs.logits.detach().cpu()
+                
+                # Get the number of samples we can add without exceeding our limit
+                samples_to_add = min(logits.shape[0], max_samples_for_metrics - samples_seen)
+                
+                # Add samples for metrics computation
+                if samples_to_add > 0:
+                    all_preds.append(logits[:samples_to_add])
+                    
+                    # Get labels (masked with -100)
+                    labels = inputs.get("labels").detach().cpu()
+                    all_labels.append(labels[:samples_to_add])
+                    
+                    samples_seen += samples_to_add
+            
+            # Log progress
+            if step % args.logging_steps == 0 and step > 0:
+                logger.info(f"  Evaluation: {step}/{num_batches} steps complete")
+        
+        # Compute loss metrics
+        if total_samples > 0:
+            metrics[f"{metric_key_prefix}_loss"] = total_loss.item() / total_samples
+        
+        # Compute model-specific metrics if available
+        if compute_metrics is not None and len(all_preds) > 0:
+            # Concatenate predictions and labels
+            eval_preds = torch.cat(all_preds, dim=0).numpy()
+            eval_labels = torch.cat(all_labels, dim=0).numpy()
+            
+            # Compute metrics
+            metric_outputs = compute_metrics((eval_preds, eval_labels))
+            
+            # Update metrics dict
+            metrics.update({f"{metric_key_prefix}_{k}": v for k, v in metric_outputs.items()})
+        
+        # Return metrics
+        return EvalLoopOutput(
+            predictions=None,  # We don't store full predictions to save memory
+            label_ids=None,    # We don't store full labels to save memory
+            metrics=metrics,
+            num_samples=num_samples,
+        )
 
 def train(
     data_path: str,
@@ -235,7 +382,7 @@ def train(
         evaluation_strategy="steps",
         eval_steps=100,
         save_strategy="steps",
-        save_steps=500,
+        save_steps=200,
         save_total_limit=3,
         load_best_model_at_end=True,
         metric_for_best_model="valid_svg_ratio",
@@ -243,11 +390,10 @@ def train(
         warmup_ratio=warmup_ratio,
         fp16=fp16,
         report_to="none",  # We'll use custom W&B logging
-        remove_unused_columns=False,
     )
 
     # Initialize the Trainer
-    trainer = Trainer(
+    trainer = MemoryEfficientTrainer(
         model=model,
         args=training_args,
         train_dataset=dataset_dict["train"],
@@ -267,7 +413,7 @@ def train(
             "num_epochs": num_epochs,
             "warmup_ratio": warmup_ratio,
             "fp16": fp16,
-        })],
+        }, tokenizer)],
     )
 
     # Train the model
