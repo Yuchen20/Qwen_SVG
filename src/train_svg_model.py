@@ -258,7 +258,7 @@ def main():
         MODEL_NAME,
         torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
         device_map="auto",
-        load_in_4bit=True,
+        # load_in_4bit=True,
     )
     
     # Prepare model for k-bit training
