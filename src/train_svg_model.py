@@ -20,7 +20,7 @@ from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_tr
 from transformers.integrations import WandbCallback
 from transformers.trainer_callback import TrainerCallback
 
-from src.svg_constraint import SVGConstraints
+from svg_constraint import SVGConstraints
 
 # Set random seeds for reproducibility
 seed = 42
