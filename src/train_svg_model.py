@@ -35,7 +35,7 @@ MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
 DATA_PATH = "data/svg_results.jsonl"
 OUTPUT_DIR = "models/qwen-svg-lora"
 MAX_LENGTH = 1560
-BATCH_SIZE = 4
+BATCH_SIZE = 2
 LEARNING_RATE = 5e-5
 NUM_EPOCHS = 5
 WARMUP_RATIO = 0.1
@@ -370,7 +370,7 @@ def main():
         num_train_epochs=NUM_EPOCHS,
         per_device_train_batch_size=BATCH_SIZE,
         per_device_eval_batch_size=BATCH_SIZE,
-        gradient_accumulation_steps=2,
+        gradient_accumulation_steps=4,
         learning_rate=LEARNING_RATE,
         weight_decay=0.01,
         max_grad_norm=1.0,
