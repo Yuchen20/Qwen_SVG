@@ -56,7 +56,7 @@ Always start with a short reasoning section:
 - **Use HTML-style comments** (`<!-- ... -->`) before each visual block explaining its purpose and color."""
 
 class SVGDataset:
-    def __init__(self, data_path: str, tokenizer: PreTrainedTokenizer, max_length: int = 1792):
+    def __init__(self, data_path: str, tokenizer: PreTrainedTokenizer, max_length: int = 1024):
         self.data_path = Path(data_path)
         self.tokenizer = tokenizer
         self.max_length = max_length
@@ -67,9 +67,6 @@ class SVGDataset:
             for line in f:
                 self.data.append(json.loads(line.strip()))
                 
-        # Add special tokens if not present
-        # special_tokens = {"additional_special_tokens": ["<reasoning>", "</reasoning>"]}
-        # self.tokenizer.add_special_tokens(special_tokens)
     
     def prepare_dataset(self) -> DatasetDict:
         """Prepare the dataset for training by converting to HF Dataset format and splitting."""
@@ -86,8 +83,15 @@ class SVGDataset:
         # Convert to HF Dataset
         dataset = Dataset.from_list(formatted_data)
         
+        # Tokenize the dataset
+        def tokenize_function(examples):
+            # This is for causal language modeling, so we don't need labels
+            return self.tokenizer(examples["text"], padding=False, truncation=True, max_length=self.max_length)
+        
+        tokenized_dataset = dataset.map(tokenize_function, batched=True, remove_columns=["text"])
+        
         # Split into train/validation/test (90/5/5)
-        splits = dataset.train_test_split(test_size=0.1, shuffle=True, seed=42)
+        splits = tokenized_dataset.train_test_split(test_size=0.1, shuffle=True, seed=42)
         test_valid = splits['test'].train_test_split(test_size=0.5, shuffle=True, seed=42)
         
         return DatasetDict({
@@ -280,7 +284,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train SVG generation model")
     parser.add_argument("--data_path", type=str, required=True, help="Path to svg_results.jsonl")
     parser.add_argument("--output_dir", type=str, required=True, help="Directory to save model checkpoints")
-    parser.add_argument("--model_name", type=str, default="Qwen/Qwen1.5-1.5B-Instruct", help="Base model to use")
+    parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-1.5B-Instruct", help="Base model to use")
     parser.add_argument("--max_length", type=int, default=1792, help="Maximum sequence length")
     parser.add_argument("--batch_size", type=int, default=4, help="Training batch size")
     parser.add_argument("--learning_rate", type=float, default=5e-5, help="Learning rate")
