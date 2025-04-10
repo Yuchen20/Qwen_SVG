@@ -300,8 +300,10 @@ class MemoryEfficientTrainer(Trainer):
                 
                 # Update loss stats
                 if loss is not None:
-                    total_loss += loss.detach().float() * batch_size
-                    total_samples += batch_size
+                    # Get the actual batch size from the input tensors
+                    current_batch_size = inputs["input_ids"].size(0)
+                    total_loss += loss.detach().float() * current_batch_size
+                    total_samples += current_batch_size
             
             # Collect predictions and labels for a limited number of samples
             if samples_seen < max_samples_for_metrics:
@@ -387,10 +389,10 @@ def train(
         learning_rate=learning_rate,
         weight_decay=0.01,
         max_grad_norm=1.0,
-        logging_steps=10,
+        logging_steps=1,
         logging_first_step=True,
         evaluation_strategy="steps",
-        eval_steps=100,
+        eval_steps=30,
         save_strategy="steps",
         save_steps=200,
         save_total_limit=3,
