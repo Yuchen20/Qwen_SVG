@@ -166,10 +166,6 @@ def create_model_and_tokenizer(
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     tokenizer.padding_side = "left"  # Set padding to the left
     
-    # Add special tokens for reasoning
-    special_tokens = {"additional_special_tokens": ["<reasoning>", "</reasoning>"]}
-    tokenizer.add_special_tokens(special_tokens)
-    
     # Load model
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
