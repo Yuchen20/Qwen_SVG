@@ -7,6 +7,7 @@ import torch
 import random
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union, Any
+import random
 
 from datasets import load_dataset, Dataset
 from transformers import (
@@ -44,6 +45,9 @@ LEFT_PADDING = True  # Use left padding as specified
 
 # Function to create the prompt from description
 def create_prompt(description):
+    if random.random() < 0.5:
+        return f"Generate an SVG for the following description: {description}"
+
     return f"""### Instruction
 Generate an SVG for the following description. Begin with a short reasoning enclosed in <reasoning>...</reasoning> tags. Follow the reasoning with a constrained SVG as per the specifications.
 
@@ -135,52 +139,52 @@ class CustomWandbCallback(WandbCallback):
     def on_evaluate(self, args, state, control, **kwargs):
         super().on_evaluate(args, state, control, **kwargs)
         
-        if hasattr(self.trainer, 'eval_dataset') and self.trainer.eval_dataset is not None:
-            # Get the last 5 samples from eval dataset
-            if len(self.trainer.eval_dataset) >= 5:
-                samples_to_log = self.trainer.eval_dataset[-5:]
-            else:
-                samples_to_log = self.trainer.eval_dataset
+        # if hasattr(self.trainer, 'eval_dataset') and self.trainer.eval_dataset is not None:
+        #     # Get the last 5 samples from eval dataset
+        #     if len(self.trainer.eval_dataset) >= 5:
+        #         samples_to_log = self.trainer.eval_dataset[-5:]
+        #     else:
+        #         samples_to_log = self.trainer.eval_dataset
             
-            # Generate outputs for these samples
-            for i, sample in enumerate(samples_to_log):
-                input_text = self.tokenizer.decode(sample["input_ids"], skip_special_tokens=True)
+        #     # Generate outputs for these samples
+        #     for i, sample in enumerate(samples_to_log):
+        #         input_text = self.tokenizer.decode(sample["input_ids"], skip_special_tokens=True)
                 
-                # Skip very long inputs to avoid CUDA OOM
-                if len(sample["input_ids"]) > MAX_LENGTH - 200:
-                    continue
+        #         # Skip very long inputs to avoid CUDA OOM
+        #         if len(sample["input_ids"]) > MAX_LENGTH - 200:
+        #             continue
                 
-                # Generate with the model
-                with torch.no_grad():
-                    input_ids = torch.tensor([sample["input_ids"]]).to(self.trainer.model.device)
-                    attention_mask = torch.tensor([[1] * len(sample["input_ids"])]).to(self.trainer.model.device)
+        #         # Generate with the model
+        #         with torch.no_grad():
+        #             input_ids = torch.tensor([sample["input_ids"]]).to(self.trainer.model.device)
+        #             attention_mask = torch.tensor([[1] * len(sample["input_ids"])]).to(self.trainer.model.device)
                     
-                    try:
-                        outputs = self.trainer.model.generate(
-                            input_ids=input_ids,
-                            attention_mask=attention_mask,
-                            max_new_tokens=1000,
-                            do_sample=True,
-                            temperature=0.7,
-                            top_p=0.9,
-                            pad_token_id=self.tokenizer.pad_token_id,
-                        )
+        #             try:
+        #                 outputs = self.trainer.model.generate(
+        #                     input_ids=input_ids,
+        #                     attention_mask=attention_mask,
+        #                     max_new_tokens=1000,
+        #                     do_sample=True,
+        #                     temperature=0.7,
+        #                     top_p=0.9,
+        #                     pad_token_id=self.tokenizer.pad_token_id,
+        #                 )
                         
-                        generated_text = self.tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
+        #                 generated_text = self.tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
                         
-                        # Log to wandb
-                        wandb.log({
-                            f"sample_{i}/input": wandb.Html(f"<pre>{input_text}</pre>"),
-                            f"sample_{i}/generated": wandb.Html(f"<pre>{generated_text}</pre>"),
-                        })
+        #                 # Log to wandb
+        #                 wandb.log({
+        #                     f"sample_{i}/input": wandb.Html(f"<pre>{input_text}</pre>"),
+        #                     f"sample_{i}/generated": wandb.Html(f"<pre>{generated_text}</pre>"),
+        #                 })
                         
-                        # Try to extract and render SVG
-                        svg_match = re.search(r"<svg.*?</svg>", generated_text, re.DOTALL)
-                        if svg_match:
-                            svg_content = svg_match.group(0)
-                            wandb.log({f"sample_{i}/svg_render": wandb.Html(svg_content)})
-                    except Exception as e:
-                        print(f"Error generating or logging sample {i}: {e}")
+        #                 # Try to extract and render SVG
+        #                 svg_match = re.search(r"<svg.*?</svg>", generated_text, re.DOTALL)
+        #                 if svg_match:
+        #                     svg_content = svg_match.group(0)
+        #                     wandb.log({f"sample_{i}/svg_render": wandb.Html(svg_content)})
+        #             except Exception as e:
+        #                 print(f"Error generating or logging sample {i}: {e}")
 
 # Custom metrics for evaluating SVG generation
 class SVGMetrics:
