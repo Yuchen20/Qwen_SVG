@@ -2,7 +2,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 import numpy as np
 import torch
@@ -15,7 +15,6 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
-    EvalLoopOutput,
     PreTrainedModel,
     PreTrainedTokenizer,
     Trainer,
@@ -25,6 +24,14 @@ from transformers import (
 from transformers.utils import logging
 
 logger = logging.get_logger(__name__)
+
+# Define our own EvalLoopOutput since it can't be imported
+@dataclass
+class EvalLoopOutput:
+    predictions: Optional[Any] = None
+    label_ids: Optional[Any] = None
+    metrics: Optional[Dict[str, float]] = None
+    num_samples: Optional[int] = None
 
 PROMPT_TEMPLATE = """### Instruction
 Generate an SVG for the following description. Begin with a short reasoning enclosed in <reasoning>...</reasoning> tags. Follow the reasoning with a constrained SVG as per the specifications.
@@ -71,6 +78,7 @@ class SVGDataset:
             for line in f:
                 self.data.append(json.loads(line.strip()))
                 
+
     
     def prepare_dataset(self) -> DatasetDict:
         """Prepare the dataset for training by converting to HF Dataset format and splitting."""
@@ -108,6 +116,10 @@ class SVGDataset:
 class SVGMetrics:
     """Calculates various metrics for generated SVG content."""
     svg_constraints: SVGConstraints = SVGConstraints()
+    tokenizer: PreTrainedTokenizer = None
+    
+    def __init__(self, tokenizer: PreTrainedTokenizer):
+        self.tokenizer = tokenizer
     
     def compute_metrics(self, eval_preds) -> Dict[str, float]:
         metrics = {}
@@ -154,6 +166,10 @@ def create_model_and_tokenizer(
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     tokenizer.padding_side = "left"  # Set padding to the left
     
+    # Add special tokens for reasoning
+    special_tokens = {"additional_special_tokens": ["<reasoning>", "</reasoning>"]}
+    tokenizer.add_special_tokens(special_tokens)
+    
     # Load model
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
@@ -161,13 +177,11 @@ def create_model_and_tokenizer(
         trust_remote_code=True,
     )
     
+    
     # Add LoRA if config provided
     if peft_config:
         model = prepare_model_for_kbit_training(model)
         model = get_peft_model(model, peft_config)
-        
-    # Resize token embeddings for new special tokens
-    # model.resize_token_embeddings(len(tokenizer))
     
     return model, tokenizer
 
@@ -192,7 +206,7 @@ class WandbCallback(TrainerCallback):
         self.tokenizer = tokenizer
         wandb.init(project="svg-generation", config=config)
     
-    def on_log(self, args, state, control, logs=None, **kwargs):
+    def on_log(self, args, state, control, logs=None):
         """Log metrics to W&B."""
         if logs:
             wandb.log(logs)
@@ -249,7 +263,7 @@ class MemoryEfficientTrainer(Trainer):
         Override the evaluation loop to save memory by not storing all predictions.
         """
         args = self.args
-        prediction_loss_only = prediction_loss_only if prediction_loss_only is not None else args.prediction_loss_only
+        prediction_loss_only = prediction_loss_only if not None else args.prediction_loss_only
         
         # Initialize metrics dict and set model to eval mode
         metrics = {}
@@ -365,7 +379,7 @@ def train(
     dataset_dict = dataset.prepare_dataset()
 
     # Initialize metrics calculator
-    metrics = SVGMetrics()
+    metrics = SVGMetrics(tokenizer)
     
     # Set up training arguments
     training_args = TrainingArguments(
@@ -385,11 +399,12 @@ def train(
         save_steps=200,
         save_total_limit=3,
         load_best_model_at_end=True,
-        metric_for_best_model="valid_svg_ratio",
+        metric_for_best_model="eval_valid_svg_ratio",  # Fixed metric name
         greater_is_better=True,
         warmup_ratio=warmup_ratio,
         fp16=fp16,
         report_to="none",  # We'll use custom W&B logging
+        remove_unused_columns=False,  # Added to fix potential column issues
     )
 
     # Initialize the Trainer
