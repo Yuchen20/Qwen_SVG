@@ -243,6 +243,7 @@ def train(
         warmup_ratio=warmup_ratio,
         fp16=fp16,
         report_to="none",  # We'll use custom W&B logging
+        remove_unused_columns=False,
     )
 
     # Initialize the Trainer
