@@ -6,7 +6,7 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from svg_constraint import SVGConstraints
-from train_svg_model import PROMPT_TEMPLATE
+from CodeGraveyard.train_svg_model import PROMPT_TEMPLATE
 
 
 def generate_svg(

@@ -5,3 +5,4 @@
 1. There exists Qwen2.5 series models with 1.5B parameters, and I am using `Qwen/Qwen2.5-1.5B-Instruct`.
 2. When plotting statsical results, use the `seaborn` library for enhanced aesthetics and clarity.
 3. Always log simplified version of what you are asked to do and what you have done in `the_watchtower.log` file. This log is crucial for tracking your actions and decisions.
+4. Never look at the folder `CodeGraveyard`. This folder is reserved for deleted code and should not be accessed or referenced in any way.
