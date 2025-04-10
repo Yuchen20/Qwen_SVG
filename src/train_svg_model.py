@@ -202,7 +202,7 @@ class WandbCallback(TrainerCallback):
         self.tokenizer = tokenizer
         wandb.init(project="svg-generation", config=config)
     
-    def on_log(self, args, state, control, logs=None):
+    def on_log(self, args, state, control, logs=None, **kwargs):
         """Log metrics to W&B."""
         if logs:
             wandb.log(logs)
