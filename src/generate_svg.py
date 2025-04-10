@@ -6,7 +6,7 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from svg_constraint import SVGConstraints
-from CodeGraveyard.train_svg_model import PROMPT_TEMPLATE
+# from train_svg_model import PROMPT_TEMPLATE
 
 
 def generate_svg(
@@ -36,7 +36,7 @@ def generate_svg(
     model = PeftModel.from_pretrained(model, model_path)
     
     # Format prompt
-    full_prompt = PROMPT_TEMPLATE.format(description=prompt)
+    full_prompt = prompt
     
     # Initialize constraints checker
     constraints = SVGConstraints()
@@ -109,7 +109,7 @@ if __name__ == "__main__":
     parser.add_argument("--temperature", type=float, default=0.8, help="Sampling temperature")
     parser.add_argument("--top_p", type=float, default=0.9, help="Nucleus sampling probability")
     parser.add_argument("--num_samples", type=int, default=1, help="Number of samples to generate")
-    
+    --prompt "Generate an SVG for the following description: A lighthouse overlooking a stormy sea" -- base_model "Qwen/Qwen2.5-1.5B-Instruct" --output_dir "results" 
     args = parser.parse_args()
     
     # Generate samples
