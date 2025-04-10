@@ -404,7 +404,7 @@ def main():
         eval_dataset=eval_tokenized,
         tokenizer=tokenizer,
         data_collator=data_collator,
-        compute_metrics=svg_metrics.compute_metrics,
+        # compute_metrics=svg_metrics.compute_metrics,
     )
     
     # Add custom wandb callback
