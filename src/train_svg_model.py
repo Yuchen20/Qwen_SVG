@@ -284,7 +284,7 @@ class MemoryEfficientTrainer(Trainer):
         Override the evaluation loop to save memory by not storing all predictions.
         """
         args = self.args
-        prediction_loss_only = prediction_loss_only if not None else args.prediction_loss_only
+        prediction_loss_only = prediction_loss_only if prediction_loss_only is not None else args.prediction_loss_only
         
         # Initialize metrics dict and set model to eval mode
         metrics = {}
@@ -292,7 +292,7 @@ class MemoryEfficientTrainer(Trainer):
         model.eval()
         
         # Disable adding preds to outputs by default to save memory
-        compute_metrics = self.compute_metrics
+        compute_metrics = self.compute_metrics if not prediction_loss_only else None
         
         # Main evaluation loop
         batch_size = dataloader.batch_size
@@ -302,12 +302,13 @@ class MemoryEfficientTrainer(Trainer):
         logger.info(f"***** Running {description} *****")
         logger.info(f"  Num examples = {num_samples}")
         logger.info(f"  Batch size = {batch_size}")
+        logger.info(f"  Prediction loss only: {prediction_loss_only}")
         
         # Initialize variables for metrics
         total_loss = 0.0
         total_samples = 0
         
-        # For SVG metrics
+        # For SVG metrics - only collect if we're not in prediction_loss_only mode
         all_preds = []
         all_labels = []
         max_samples_for_metrics = min(100, num_samples)  # Limit samples to save memory
@@ -330,23 +331,34 @@ class MemoryEfficientTrainer(Trainer):
                     total_loss += loss.detach().float() * current_batch_size
                     total_samples += current_batch_size
             
-            # Collect predictions and labels for a limited number of samples
-            if samples_seen < max_samples_for_metrics:
-                # Get predictions
-                logits = outputs.logits.detach().cpu()
-                
-                # Get the number of samples we can add without exceeding our limit
-                samples_to_add = min(logits.shape[0], max_samples_for_metrics - samples_seen)
-                
-                # Add samples for metrics computation
-                if samples_to_add > 0:
-                    all_preds.append(logits[:samples_to_add])
-                    
-                    # Get labels (masked with -100)
+            # Collect predictions and labels for metrics computation, but only if we need them
+            if compute_metrics is not None and samples_seen < max_samples_for_metrics:
+                try:
+                    # Get predictions
+                    logits = outputs.logits.detach().cpu()
                     labels = inputs.get("labels").detach().cpu()
-                    all_labels.append(labels[:samples_to_add])
                     
-                    samples_seen += samples_to_add
+                    # Determine how many samples to add without exceeding our limit
+                    samples_to_add = min(logits.shape[0], max_samples_for_metrics - samples_seen)
+                    
+                    if samples_to_add > 0:
+                        # Add only complete samples to avoid dimension issues
+                        if len(all_preds) == 0:  
+                            # First batch - set the expected shape based on the first sample
+                            expected_shape = logits[0].shape
+                            all_preds.append(logits[:samples_to_add])
+                            all_labels.append(labels[:samples_to_add])
+                            samples_seen += samples_to_add
+                        else:
+                            # Only add samples that match the expected shape
+                            for i in range(samples_to_add):
+                                if i < logits.shape[0] and logits[i].shape == expected_shape:
+                                    all_preds.append(logits[i:i+1])
+                                    all_labels.append(labels[i:i+1])
+                                    samples_seen += 1
+                except Exception as e:
+                    logger.warning(f"Error collecting predictions for metrics: {e}")
+                    # Continue with evaluation even if we can't compute all metrics
             
             # Log progress
             if step % args.logging_steps == 0 and step > 0:
@@ -356,17 +368,26 @@ class MemoryEfficientTrainer(Trainer):
         if total_samples > 0:
             metrics[f"{metric_key_prefix}_loss"] = total_loss.item() / total_samples
         
-        # Compute model-specific metrics if available
+        # Compute model-specific metrics if available and we have predictions
         if compute_metrics is not None and len(all_preds) > 0:
-            # Concatenate predictions and labels
-            eval_preds = torch.cat(all_preds, dim=0).numpy()
-            eval_labels = torch.cat(all_labels, dim=0).numpy()
-            
-            # Compute metrics
-            metric_outputs = compute_metrics((eval_preds, eval_labels))
-            
-            # Update metrics dict
-            metrics.update({f"{metric_key_prefix}_{k}": v for k, v in metric_outputs.items()})
+            try:
+                # Concatenate predictions and labels
+                if len(all_preds) == 1:
+                    # Single batch case
+                    eval_preds = all_preds[0].numpy()
+                    eval_labels = all_labels[0].numpy()
+                else:
+                    # Multiple batches case - concatenate along batch dimension
+                    eval_preds = torch.cat(all_preds, dim=0).numpy()
+                    eval_labels = torch.cat(all_labels, dim=0).numpy()
+                
+                # Compute metrics
+                metric_outputs = compute_metrics((eval_preds, eval_labels))
+                
+                # Update metrics dict
+                metrics.update({f"{metric_key_prefix}_{k}": v for k, v in metric_outputs.items()})
+            except Exception as e:
+                logger.warning(f"Error computing metrics: {e}")
         
         # Return metrics
         return EvalLoopOutput(
