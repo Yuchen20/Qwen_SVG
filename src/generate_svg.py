@@ -36,6 +36,11 @@ def generate_svg(
     
     # Load LoRA weights
     model = PeftModel.from_pretrained(model, model_path)
+
+    # merge the LoRA weights into the base model
+    model = model.merge_and_unload()
+
+
     print(f"LoRA weights loaded from {model_path}")
     # Format prompt
     full_prompt = prompt
@@ -51,48 +56,17 @@ def generate_svg(
         inputs = tokenizer(full_prompt, return_tensors="pt", truncation=True)
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
         
-        # Generate
-        # Generate with manual autoregressive approach
-        input_ids = inputs["input_ids"]
-        attention_mask = inputs["attention_mask"]
-        generated_ids = input_ids.clone()
         
+        # Generate
         with torch.no_grad():
-            for _ in tqdm(range(max_new_tokens), desc="Generating tokens"):
-            # Forward pass
-                outputs = model(
-                    input_ids=generated_ids,
-                    attention_mask=attention_mask,
-                )
-                
-                # Get next token logits
-                next_token_logits = outputs.logits[:, -1, :]
-                
-                # Apply temperature
-                next_token_logits = next_token_logits / temperature
-                
-                # Apply top_p sampling
-                sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
-                cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
-                sorted_indices_to_remove = cumulative_probs > top_p
-                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-                sorted_indices_to_remove[..., 0] = 0
-                indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
-                next_token_logits[indices_to_remove] = -float('inf')
-                
-                # Sample next token
-                probs = torch.softmax(next_token_logits, dim=-1)
-                next_token = torch.multinomial(probs, num_samples=1)
-                
-                # Append next token to generated sequence
-                generated_ids = torch.cat([generated_ids, next_token], dim=-1)
-                attention_mask = torch.cat([attention_mask, attention_mask.new_ones((attention_mask.shape[0], 1))], dim=-1)
-                
-                # Check if we've reached an end condition
-                if next_token[0, 0].item() == tokenizer.eos_token_id:
-                    break
-            
-        outputs = generated_ids
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=True,
+                temperature=temperature,
+                top_p=top_p,
+                pad_token_id=tokenizer.pad_token_id,
+            )
         
         # Decode output
         generated = tokenizer.decode(outputs[0], skip_special_tokens=False)
