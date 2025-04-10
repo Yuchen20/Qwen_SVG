@@ -35,7 +35,7 @@ if torch.cuda.is_available():
 MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
 DATA_PATH = "data/svg_results.jsonl"
 OUTPUT_DIR = "models/qwen-svg-lora"
-MAX_LENGTH = 1560
+MAX_LENGTH = 1024
 BATCH_SIZE = 2
 LEARNING_RATE = 5e-5
 NUM_EPOCHS = 5
