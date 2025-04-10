@@ -8,6 +8,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from svg_constraint import SVGConstraints
 # from train_svg_model import PROMPT_TEMPLATE
 
+from tqdm import tqdm
 
 def generate_svg(
     prompt: str,
@@ -26,6 +27,7 @@ def generate_svg(
         torch_dtype=torch.float16,
         trust_remote_code=True,
     )
+    print(f"Model loaded from {base_model}")
     
     # Add special tokens
     # special_tokens = {"additional_special_tokens": ["<reasoning>", "</reasoning>"]}
@@ -34,16 +36,17 @@ def generate_svg(
     
     # Load LoRA weights
     model = PeftModel.from_pretrained(model, model_path)
-    
+    print(f"LoRA weights loaded from {model_path}")
     # Format prompt
     full_prompt = prompt
+
     
     # Initialize constraints checker
     constraints = SVGConstraints()
     
     # Generate samples
     results = []
-    for _ in range(num_samples):
+    for _ in tqdm(range(num_samples), desc="Generating SVGs"):
         # Tokenize input
         inputs = tokenizer(full_prompt, return_tensors="pt", truncation=True)
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
@@ -61,6 +64,7 @@ def generate_svg(
         
         # Decode output
         generated = tokenizer.decode(outputs[0], skip_special_tokens=False)
+        print(f"Generated SVG: {generated}")
         
         # Try to validate SVG
         try:
